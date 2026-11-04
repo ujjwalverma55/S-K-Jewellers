@@ -1,0 +1,12 @@
+{
+  "name": "sk-jewellers-app",
+  "version": "1.0.0",
+  "description": "SK Jewellers — gold ring order, production, and ledger tracking app. Zero external dependencies; uses only Node.js built-in modules.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}

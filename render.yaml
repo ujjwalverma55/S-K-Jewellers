@@ -1,0 +1,43 @@
+# Render.com Blueprint for SK Jewellers (app-v2).
+#
+# This file lets Render set up the whole service from one definition instead of
+# clicking through the dashboard by hand — on render.com, use "New +" -> "Blueprint"
+# and point it at the GitHub repo containing this app-v2/ folder.
+#
+# IMPORTANT — persistent disk pricing: as of when this was written, Render's disk
+# feature required at least their lowest PAID instance tier, not the completely free
+# one — double-check current pricing/plan names on render.com before relying on this,
+# since hosting plans change over time and this file was not verified live against
+# Render's current dashboard. This app genuinely needs a persistent disk — the SQLite
+# database file and every uploaded photo/document live on it — so deploying without a
+# disk means all data is silently lost on every restart/redeploy. Treat a no-disk
+# deployment as throwaway/demo only.
+#
+# This app needs TWO folders to persist (the database folder AND the uploads folder),
+# but a Render disk only has one mount path. Rather than guess at a path convention
+# that only applies to some hosts, the disk is mounted at a single parent folder
+# ("/var/data") and DATA_DIR / UPLOADS_DIR below point at subfolders under it — both
+# env vars are read directly by db.js, server.js, and backup.js.
+services:
+  - type: web
+    name: sk-jewellers
+    runtime: node
+    plan: starter        # lowest paid tier that supports an attached disk; change if Render's plan names differ when you deploy
+    buildCommand: ""     # nothing to install — zero npm dependencies
+    startCommand: node server.js
+    healthCheckPath: /healthz
+    disk:
+      name: sk-jewellers-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /var/data/db
+      - key: UPLOADS_DIR
+        value: /var/data/uploads
+      # SHOW_DEMO_CREDENTIALS intentionally omitted / left unset here — the demo
+      # login/password box on the public login page stays hidden by default. Only set
+      # this to "1" temporarily if you specifically want to show it (e.g. a sandbox
+      # demo instance that isn't holding real business data).
