@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Attendance — SK Jewellers</title>
+<link rel="stylesheet" href="/common.css">
+</head>
+<body>
+<div id="topbarMount"></div>
+<div class="container">
+  <h1>Maker Attendance</h1>
+  <p class="subtitle">Simple daily attendance log for jewellery makers</p>
+
+  <form id="attForm" class="row" style="margin-bottom:20px;">
+    <div class="field"><label>Maker</label><select id="aMaker"></select></div>
+    <div class="field"><label>Date</label><input type="date" id="aDate" required></div>
+    <div class="field"><label>Present?</label>
+      <select id="aPresent"><option value="1">Present</option><option value="0">Absent</option></select>
+    </div>
+    <div class="field" style="flex:1;"><label>Note</label><input id="aNote" placeholder="optional"></div>
+    <button class="btn">Log Attendance</button>
+  </form>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Date</th><th>Maker</th><th>Status</th><th>Note</th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script src="/common.js"></script>
+<script>
+let me, makers = [];
+(async function init() {
+  me = await requireUser(['OWNER','MAKER']);
+  if (!me) return;
+  document.getElementById('topbarMount').innerHTML = buildTopbar(me, '/' + me.role.toLowerCase() + '/attendance.html');
+  document.getElementById('aDate').value = new Date().toISOString().slice(0,10);
+  if (me.role === 'OWNER') {
+    const users = await api('/api/users');
+    makers = users.filter(u => u.role === 'MAKER');
+    document.getElementById('aMaker').innerHTML = makers.map(m => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('');
+  } else {
+    document.getElementById('aMaker').innerHTML = `<option value="${me.id}">${escapeHtml(me.name)} (you)</option>`;
+    document.getElementById('aMaker').disabled = true;
+  }
+  await loadAttendance();
+})();
+
+document.getElementById('attForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = {
+    maker_id: Number(document.getElementById('aMaker').value),
+    date: document.getElementById('aDate').value,
+    present: document.getElementById('aPresent').value === '1',
+    note: document.getElementById('aNote').value.trim(),
+  };
+  try {
+    await api('/api/attendance', { method: 'POST', body });
+    document.getElementById('aNote').value = '';
+    await loadAttendance();
+  } catch (err) { alert(err.message); }
+});
+
+async function loadAttendance() {
+  const rows = await api('/api/attendance');
+  document.getElementById('tbody').innerHTML = rows.map(r => `
+    <tr>
+      <td>${escapeHtml(r.date)}</td>
+      <td>${escapeHtml(r.maker_name)}</td>
+      <td>${r.present ? '<span class="badge DELIVERED">Present</span>' : '<span class="badge ON_HOLD">Absent</span>'}</td>
+      <td>${escapeHtml(r.note||'—')}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="4" class="empty-state">No attendance logged yet.</td></tr>';
+}
+</script>
+</body>
+</html>

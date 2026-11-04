@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Backups — SK Jewellers</title>
+<link rel="stylesheet" href="/common.css">
+</head>
+<body>
+<div id="topbarMount"></div>
+<div class="container">
+  <h1>Backups</h1>
+  <p class="subtitle">Protect your data against computer loss, accidental deletion, or disk failure</p>
+
+  <div class="card" style="margin-bottom:20px;">
+    <div class="label">Manual Backup</div>
+    <p class="muted" style="margin:8px 0 14px;">Downloads a single .zip file to your computer right now, containing: a full database snapshot, a ready-to-open <strong>customers.xlsx</strong> and <strong>orders.xlsx</strong> (real Excel files, no app needed to view them), <strong>workers_directory.csv</strong> and <strong>attendance_log.csv</strong> for employee data, <strong>gold_receipts.csv</strong> and <strong>maker_commissions.csv</strong> for the gold ledgers, and every photo/document ever uploaded. Save this somewhere safe — like a USB drive, Google Drive, or email it to yourself.</p>
+    <button class="btn" onclick="downloadBackupNow()">⬇ Backup Now (Download .zip)</button>
+    <span id="backupStatus" class="muted" style="margin-left:10px;"></span>
+  </div>
+
+  <div class="card" style="margin-bottom:20px;">
+    <div class="label">Automatic Backups</div>
+    <p class="muted" style="margin:8px 0;">
+      While this app's server is running, it automatically creates a backup .zip roughly once a week and stores it on this computer (in <code>app/data/backups/</code>), keeping the most recent 8 automatically and deleting older ones.
+    </p>
+    <div class="alert-box" style="background:#fff4d6; border-color:#f0dca0; color:#8a660a;">
+      <strong>Important — what this does and doesn't protect against</strong>
+      Automatic backups are saved on this same computer, so they won't help if this computer is lost, stolen, or its hard drive fails. For real protection, periodically click "Backup Now" above and copy the downloaded file to a USB drive, cloud storage (Google Drive, Dropbox), or email it to yourself or a trusted person. Treat the automatic backups as a convenience for quick recovery from accidental deletions — not a substitute for an off-site copy.
+    </div>
+  </div>
+
+  <h2>Backup History</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>File Name</th><th>Type</th><th>Size</th><th>Created</th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script src="/common.js"></script>
+<script>
+let me;
+(async function init() {
+  me = await requireUser(['OWNER']);
+  if (!me) return;
+  document.getElementById('topbarMount').innerHTML = buildTopbar(me, '/owner/backups.html');
+  await loadHistory();
+})();
+
+async function loadHistory() {
+  const rows = await api('/api/backup/history');
+  document.getElementById('tbody').innerHTML = rows.map(r => `
+    <tr>
+      <td>${escapeHtml(r.file_name)}</td>
+      <td>${r.kind === 'MANUAL' ? '<span class="badge DELIVERED">Manual</span>' : '<span class="badge IN_PROGRESS">Automatic</span>'}</td>
+      <td>${(r.size_bytes / 1024).toFixed(1)} KB</td>
+      <td>${escapeHtml(r.created_at)}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="4" class="empty-state">No backups yet. Click "Backup Now" above to create your first one.</td></tr>';
+}
+
+async function downloadBackupNow() {
+  const statusEl = document.getElementById('backupStatus');
+  statusEl.textContent = 'Preparing backup…';
+  try {
+    const res = await fetch('/api/backup/download', { credentials: 'same-origin' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Backup failed');
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get('Content-Disposition') || '';
+    const match = /filename="([^"]+)"/.exec(disposition);
+    const filename = match ? match[1] : 'sk-jewellers-backup.zip';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    statusEl.textContent = 'Backup downloaded: ' + filename;
+    await loadHistory();
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Jobs — SK Jewellers</title>
+<link rel="stylesheet" href="/common.css">
+</head>
+<body>
+<div id="topbarMount"></div>
+<div class="container">
+  <h1>My Assigned Jobs</h1>
+  <p class="subtitle">Update production status and add notes for packages assigned to you</p>
+
+  <div class="cards" id="statCards"></div>
+
+  <div class="card" id="metalPriceCard" style="margin-bottom:20px;">
+    <div class="label">Live Gold / Silver Price <span class="muted" id="metalPriceCurrency"></span></div>
+    <div id="metalPriceBody" class="muted" style="margin-top:8px;">Loading…</div>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Package</th><th>Customer</th><th>Weight/Karat</th><th>Status</th><th>Due Date</th><th>Timeliness</th><th></th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <h2>My Gold Commission</h2>
+  <p class="subtitle">Gold earned automatically when you deliver an assigned order, at the shop's current commission rate.</p>
+  <div class="cards" id="commissionStatCards" style="margin-bottom:16px;"></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Package</th><th>Weight (g)</th><th>Rate (%)</th><th>Commission (g)</th><th>Earned On</th><th>Paid?</th></tr></thead>
+      <tbody id="commissionTbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Detail Modal -->
+<div class="modal-overlay" id="detailOverlay">
+  <div class="modal" style="max-width:600px;">
+    <h3 id="detailTitle">Job Detail</h3>
+    <div class="row" style="margin-bottom:10px;">
+      <button class="btn small secondary" onclick="shareCurrentPkg()">📤 Share on WhatsApp</button>
+    </div>
+    <div class="field" style="margin-bottom:14px;">
+      <label>Update Status</label>
+      <select id="statusSelect">
+        <option value="IN_PROGRESS">In Progress</option>
+        <option value="ON_HOLD">On Hold</option>
+        <option value="DELIVERED">Delivered</option>
+      </select>
+      <label class="muted" style="font-size:0.8rem; display:block; margin:10px 0 4px;">Delivery Date</label>
+      <input type="date" id="deliveryDateInput" style="width:100%;">
+      <div id="receivedByField" style="display:none; margin-top:8px;">
+        <label class="muted" style="font-size:0.8rem; display:block; margin-bottom:4px;">Received By (Name) *</label>
+        <input id="receivedByInput" style="width:100%;" placeholder="Name of person who received the order">
+      </div>
+      <div id="lateReasonField" style="display:none; margin-top:8px;">
+        <label class="muted" style="font-size:0.8rem; display:block; margin-bottom:4px;">This is past the due date — why was it late? *</label>
+        <textarea id="lateReasonInput" rows="2" style="width:100%;" placeholder="e.g. customer changed design, gold supply delayed..."></textarea>
+      </div>
+      <button class="btn small" style="margin-top:8px; width:fit-content;" onclick="updateStatus()">Save Status</button>
+      <div id="statusError"></div>
+    </div>
+    <h3>Production Log</h3>
+    <div id="updatesList" class="stack" style="margin-bottom:12px;"></div>
+    <form id="updateForm" class="row">
+      <input id="updateNote" placeholder="Add a production note (e.g. 'casting done')..." style="flex:1;" required>
+      <button class="btn small">Add Note</button>
+    </form>
+    <h3 style="margin-top:20px;">Photos</h3>
+    <div id="attachmentsList" class="row" style="margin-bottom:12px; flex-wrap:wrap;"></div>
+    <form id="attachForm" class="stack">
+      <input type="file" id="attachFile" accept="image/*" required>
+      <button class="btn small">Upload Photo</button>
+    </form>
+    <div class="modal-actions"><button type="button" class="btn secondary" onclick="closeDetail()">Close</button></div>
+  </div>
+</div>
+
+<script src="/common.js"></script>
+<script>
+let me, currentPkgId = null, currentPkgData = null;
+(async function init() {
+  me = await requireUser(['MAKER']);
+  if (!me) return;
+  document.getElementById('topbarMount').innerHTML = buildTopbar(me, '/maker/');
+  await Promise.all([loadJobs(), loadMetalPriceWidget('metalPriceBody', 'metalPriceCurrency'), loadMyCommissions()]);
+})();
+
+async function loadMyCommissions() {
+  const rows = await api('/api/maker-commissions');
+  const totalEarned = rows.reduce((s, r) => s + (r.commission_fine_gold_grams || 0), 0);
+  const totalUnpaid = rows.filter(r => !r.paid).reduce((s, r) => s + (r.commission_fine_gold_grams || 0), 0);
+  document.getElementById('commissionStatCards').innerHTML = `
+    <div class="card"><div class="label">Total Commission Earned (g)</div><div class="value">${fmtNum(totalEarned)}</div></div>
+    <div class="card"><div class="label">Unpaid Balance (g)</div><div class="value ${totalUnpaid > 0 ? 'gold' : 'green'}">${fmtNum(totalUnpaid)}</div></div>
+  `;
+  document.getElementById('commissionTbody').innerHTML = rows.map(r => `
+    <tr>
+      <td>${escapeHtml(r.package_code||'—')}</td>
+      <td>${fmtNum(r.base_weight_grams)}</td>
+      <td>${fmtNum(r.rate_percent_used)}%</td>
+      <td><strong>${fmtNum(r.commission_fine_gold_grams)}</strong></td>
+      <td>${fmtDate(r.created_at)}</td>
+      <td>${r.paid ? '<span class="badge DELIVERED">Paid</span>' : '<span class="badge IN_PROGRESS">Unpaid</span>'}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="6" class="empty-state">No commission earned yet — this appears automatically once you deliver an assigned order.</td></tr>';
+}
+
+async function loadJobs() {
+  const rows = await api('/api/packages?mine=1');
+  const inProgress = rows.filter(r => r.package_status === 'IN_PROGRESS').length;
+  const onHold = rows.filter(r => r.package_status === 'ON_HOLD').length;
+  const delivered = rows.filter(r => r.package_status === 'DELIVERED').length;
+  document.getElementById('statCards').innerHTML = `
+    <div class="card"><div class="label">Total Assigned</div><div class="value">${rows.length}</div></div>
+    <div class="card"><div class="label">In Progress</div><div class="value gold">${inProgress}</div></div>
+    <div class="card"><div class="label">On Hold</div><div class="value red">${onHold}</div></div>
+    <div class="card"><div class="label">Delivered</div><div class="value green">${delivered}</div></div>
+  `;
+  document.getElementById('tbody').innerHTML = rows.map(p => `
+    <tr>
+      <td><strong>${escapeHtml(p.package_code)}</strong><br><span class="muted">${escapeHtml(p.huid_number||'')}</span></td>
+      <td>${escapeHtml(p.customer.code)} — ${escapeHtml(p.customer.name)}</td>
+      <td>${fmtNum(p.weight_grams)} g @ ${fmtNum(p.karat)}k</td>
+      <td>${statusBadge(p.package_status)}</td>
+      <td>${fmtDate(p.estimated_completion_date)}</td>
+      <td>${timelinessBadge(p.timeliness)}</td>
+      <td><button class="btn small secondary" onclick="openDetail(${p.id}, '${escapeHtml(p.package_code)}', '${p.package_status}')">Open</button></td>
+    </tr>
+  `).join('') || '<tr><td colspan="7" class="empty-state">No jobs assigned to you yet. Ask the owner to assign packages.</td></tr>';
+}
+
+async function openDetail(pkgId, code, status) {
+  currentPkgId = pkgId;
+  document.getElementById('detailTitle').textContent = `Package ${code}`;
+  document.getElementById('statusSelect').value = status;
+  document.getElementById('lateReasonField').style.display = 'none';
+  document.getElementById('lateReasonInput').value = '';
+  document.getElementById('statusError').innerHTML = '';
+  currentPkgData = await api(`/api/packages/${pkgId}`);
+  document.getElementById('deliveryDateInput').value = currentPkgData.delivery_date || '';
+  document.getElementById('receivedByInput').value = currentPkgData.received_by_name || '';
+  document.getElementById('statusSelect').onchange = () => { checkIfLateReasonNeeded(); checkIfReceivedByNeeded(); };
+  checkIfLateReasonNeeded();
+  checkIfReceivedByNeeded();
+  await loadUpdates();
+  await loadAttachments();
+  document.getElementById('detailOverlay').classList.add('open');
+}
+function closeDetail() { document.getElementById('detailOverlay').classList.remove('open'); currentPkgId = null; loadJobs(); }
+
+function checkIfLateReasonNeeded() {
+  if (!currentPkgData) return;
+  const status = document.getElementById('statusSelect').value;
+  const estimate = currentPkgData.estimated_completion_date;
+  const today = new Date().toISOString().slice(0,10);
+  const isLate = status === 'DELIVERED' && estimate && today > estimate && !currentPkgData.late_reason;
+  document.getElementById('lateReasonField').style.display = isLate ? '' : 'none';
+}
+
+function checkIfReceivedByNeeded() {
+  const status = document.getElementById('statusSelect').value;
+  document.getElementById('receivedByField').style.display = status === 'DELIVERED' ? '' : 'none';
+}
+
+function shareCurrentPkg() {
+  if (!currentPkgData) return;
+  shareOrderOnWhatsApp(currentPkgData);
+}
+
+async function updateStatus() {
+  const status = document.getElementById('statusSelect').value;
+  const lateReasonVisible = document.getElementById('lateReasonField').style.display !== 'none';
+  const lateReason = document.getElementById('lateReasonInput').value.trim();
+  if (lateReasonVisible && !lateReason) {
+    document.getElementById('statusError').innerHTML = `<div class="error-msg">Please explain why this order is late before marking it Delivered.</div>`;
+    return;
+  }
+  const receivedByName = document.getElementById('receivedByInput').value.trim();
+  if (status === 'DELIVERED' && !receivedByName) {
+    document.getElementById('statusError').innerHTML = `<div class="error-msg">Please record who received the order before marking it Delivered.</div>`;
+    return;
+  }
+  try {
+    const body = {
+      package_status: status,
+      delivery_date: document.getElementById('deliveryDateInput').value || null,
+      received_by_name: receivedByName || null,
+    };
+    if (lateReason) body.late_reason = lateReason;
+    await api(`/api/packages/${currentPkgId}`, { method: 'PUT', body });
+    document.getElementById('statusError').innerHTML = '';
+    currentPkgData = await api(`/api/packages/${currentPkgId}`);
+    if (status === 'DELIVERED') await loadMyCommissions(); // a new commission entry may have just been earned
+    alert('Status updated.');
+  } catch (err) {
+    document.getElementById('statusError').innerHTML = `<div class="error-msg">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function loadUpdates() {
+  const rows = await api(`/api/packages/${currentPkgId}/updates`);
+  document.getElementById('updatesList').innerHTML = rows.map(u => `
+    <div class="card" style="padding:10px 14px;">
+      <div style="font-size:0.85rem;">${escapeHtml(u.note)}</div>
+      <div class="muted" style="font-size:0.74rem; margin-top:4px;">${escapeHtml(u.updated_by_name||'')} · ${escapeHtml(u.created_at)}</div>
+    </div>
+  `).join('') || '<p class="muted">No notes yet.</p>';
+}
+
+document.getElementById('updateForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const note = document.getElementById('updateNote').value.trim();
+  if (!note) return;
+  try {
+    await api(`/api/packages/${currentPkgId}/updates`, { method: 'POST', body: { note } });
+    document.getElementById('updateNote').value = '';
+    await loadUpdates();
+  } catch (err) { alert(err.message); }
+});
+
+async function loadAttachments() {
+  const rows = await api(`/api/attachments?packageId=${currentPkgId}`);
+  document.getElementById('attachmentsList').innerHTML = rows.map(a => `
+    <img class="photo-thumb" src="/uploads/${a.file_path}" alt="${escapeHtml(a.original_name)}">
+  `).join('') || '<p class="muted">No photos yet.</p>';
+}
+
+document.getElementById('attachForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fileInput = document.getElementById('attachFile');
+  if (!fileInput.files[0]) return;
+  const fd = new FormData();
+  fd.append('file', fileInput.files[0]);
+  fd.append('package_id', currentPkgId);
+  fd.append('type', 'PHOTO');
+  try {
+    await apiUpload('/api/attachments', fd);
+    fileInput.value = '';
+    await loadAttachments();
+  } catch (err) { alert(err.message); }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Customers — SK Jewellers</title>
+<link rel="stylesheet" href="/common.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+</head>
+<body>
+<div id="topbarMount"></div>
+<div class="container">
+  <div class="row" style="justify-content:space-between;">
+    <div>
+      <h1>Customers</h1>
+      <p class="subtitle">Manage customer master records — add, edit, or remove customers</p>
+    </div>
+    <div class="row">
+      <button class="btn secondary" onclick="exportCustomersExcel()">⬇ Export Excel</button>
+      <button class="btn secondary" onclick="exportCustomersPdf()">⬇ Export PDF</button>
+      <button class="btn" onclick="openCustomerModal()">+ Add Customer</button>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th></th><th>Code</th><th>Name</th><th>Firm</th><th>City</th><th>State</th><th>Phone</th><th>GST No.</th><th>Packages</th><th>Balance (g)</th><th></th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Gold Ledger modal: view/record gold receipts settling an old balance with no new order (Use Case 1) -->
+<div class="modal-overlay" id="ledgerOverlay">
+  <div class="modal" style="max-width:640px;">
+    <h3 id="ledgerTitle">Gold Ledger</h3>
+    <div class="cards" id="ledgerSummary" style="margin-bottom:16px;"></div>
+    <h4 style="margin:0 0 8px;">Record a Gold Receipt</h4>
+    <p class="muted" style="margin:0 0 10px;">Use this when the customer brings gold later to settle an old balance — not for a new order. Works for both fine and bread (impure) gold; enter whatever karat/purity applies.</p>
+    <form id="receiptForm" class="form-grid" style="margin-bottom:16px;">
+      <div class="field"><label>Date *</label><input type="date" id="rDate" required></div>
+      <div class="field"><label>Weight (g) *</label><input type="number" step="0.001" id="rWeight" required></div>
+      <div class="field"><label>Karat / Purity *</label><input type="number" step="0.01" id="rKarat" required placeholder="e.g. 92 or 75"></div>
+      <div class="field"><label>Type</label>
+        <select id="rType"><option value="FINE">Fine</option><option value="BREAD">Bread</option></select>
+      </div>
+      <div class="field full"><label>Note</label><input id="rNote" placeholder="optional"></div>
+      <div class="field full"><button class="btn small" type="submit">Add Receipt</button></div>
+    </form>
+    <h4 style="margin:16px 0 8px;">Receipt History</h4>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Date</th><th>Weight (g)</th><th>Karat</th><th>Type</th><th>Fine Gold (g)</th><th>Note</th><th></th></tr></thead>
+        <tbody id="receiptsTbody"></tbody>
+      </table>
+    </div>
+    <div class="modal-actions"><button type="button" class="btn secondary" onclick="closeLedger()">Close</button></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <h3 id="modalTitle">Add Customer</h3>
+    <form id="custForm">
+      <input type="hidden" id="custId">
+      <div class="form-grid">
+        <div class="field"><label>Customer Code *</label><input id="code" required placeholder="C004"></div>
+        <div class="field"><label>Customer Name *</label><input id="name" required></div>
+        <div class="field"><label>Firm / Business Name</label><input id="firm_name"></div>
+        <div class="field"><label>City</label><input id="city"></div>
+        <div class="field"><label>State</label><input id="state"></div>
+        <div class="field"><label>Phone Number (for WhatsApp share)</label><input id="phone_number" placeholder="e.g. 9876543210"></div>
+        <div class="field"><label>GST Number</label><input id="gst_number"></div>
+        <div class="field full"><label>Notes</label><textarea id="notes" rows="2"></textarea></div>
+      </div>
+
+      <div id="custPhotoSection" style="display:none; margin-top:14px;">
+        <h4 style="margin:0 0 8px; border-top:1px solid var(--border); padding-top:14px;">Profile Photo</h4>
+        <div class="row" style="align-items:center;">
+          <img id="custPhotoPreview" class="photo-thumb" style="display:none;">
+          <input type="file" id="custPhotoFile" accept="image/*">
+          <button type="button" class="btn small secondary" onclick="uploadCustomerPhoto()">Upload</button>
+        </div>
+      </div>
+
+      <div id="formError"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn secondary" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="/common.js"></script>
+<script>
+let me, customers = [], packages = [], balanceByCustomer = {};
+(async function init() {
+  me = await requireUser(['OWNER']);
+  if (!me) return;
+  document.getElementById('topbarMount').innerHTML = buildTopbar(me, '/owner/customers.html');
+  await loadAll();
+})();
+
+async function loadAll() {
+  const [custRows, pkgRows, dashRows] = await Promise.all([api('/api/customers'), api('/api/packages'), api('/api/dashboard/customers')]);
+  customers = custRows; packages = pkgRows;
+  balanceByCustomer = {};
+  for (const d of dashRows) balanceByCustomer[d.id] = d.total_balance || 0;
+  render();
+}
+
+function render() {
+  document.getElementById('tbody').innerHTML = customers.map((c, idx) => {
+    const count = packages.filter(p => p.customer_id === c.id).length;
+    const balance = balanceByCustomer[c.id] || 0;
+    return `<tr>
+      <td>${c.profile_photo_path
+        ? `<img class="photo-thumb" style="width:40px;height:40px;" src="/uploads/${c.profile_photo_path}">`
+        : `<div class="photo-thumb" style="width:40px;height:40px;background:#f4f0e6;display:flex;align-items:center;justify-content:center;font-size:0.9rem;">${escapeHtml((c.name||'?').charAt(0).toUpperCase())}</div>`}</td>
+      <td><strong>${escapeHtml(c.code)}</strong></td>
+      <td>${escapeHtml(c.name)}</td>
+      <td>${escapeHtml(c.firm_name||'—')}</td>
+      <td>${escapeHtml(c.city||'—')}</td>
+      <td>${escapeHtml(c.state||'—')}</td>
+      <td>${escapeHtml(c.phone_number||'—')}</td>
+      <td>${escapeHtml(c.gst_number||'—')}</td>
+      <td>${count}</td>
+      <td class="${balance >= 0 ? 'green' : 'red'}" style="font-weight:600;">${fmtNum(balance)}</td>
+      <td class="row">
+        <button class="btn small secondary" onclick="openCustomerModalByIndex(${idx})">Edit</button>
+        <button class="btn small secondary" onclick="openLedgerByIndex(${idx})">Gold Ledger</button>
+        <button class="btn small danger" onclick="deleteCustomer(${c.id})">Delete</button>
+      </td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="11" class="empty-state">No customers yet. Click "+ Add Customer" to create one.</td></tr>';
+}
+
+// See note in packages.html: avoid inlining JSON into onclick="..." attributes, since
+// an apostrophe/quote in any field (name, notes, etc.) would break the HTML and hide
+// the row's buttons. Look the row up from the `customers` array by index instead.
+function openCustomerModalByIndex(idx) { openCustomerModal(customers[idx]); }
+
+// ---- Gold Ledger modal (Use Case 1: gold receipts settling an old balance, no new order) ----
+let currentLedgerCustomer = null, lastLoadedReceipts = [];
+function openLedgerByIndex(idx) { openLedger(customers[idx]); }
+
+async function openLedger(c) {
+  currentLedgerCustomer = c;
+  document.getElementById('ledgerTitle').textContent = `Gold Ledger — ${c.code} (${c.name})`;
+  document.getElementById('rDate').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('rWeight').value = '';
+  document.getElementById('rKarat').value = '';
+  document.getElementById('rType').value = 'FINE';
+  document.getElementById('rNote').value = '';
+  await loadLedgerSummaryAndReceipts();
+  document.getElementById('ledgerOverlay').classList.add('open');
+}
+function closeLedger() { document.getElementById('ledgerOverlay').classList.remove('open'); currentLedgerCustomer = null; loadAll(); }
+
+async function loadLedgerSummaryAndReceipts() {
+  const c = currentLedgerCustomer;
+  const pkgTotal = packages.filter(p => p.customer_id === c.id).reduce((s, p) => s + (p.net_balance_fine_gold_grams || 0), 0);
+  lastLoadedReceipts = await api(`/api/gold-receipts?customerId=${c.id}`);
+  const receiptTotal = lastLoadedReceipts.reduce((s, r) => s + (r.fine_gold_grams || 0), 0);
+  const netBalance = pkgTotal - receiptTotal;
+  document.getElementById('ledgerSummary').innerHTML = `
+    <div class="card"><div class="label">From Orders (g)</div><div class="value">${fmtNum(pkgTotal)}</div></div>
+    <div class="card"><div class="label">Gold Receipts (g)</div><div class="value">${fmtNum(receiptTotal)}</div></div>
+    <div class="card"><div class="label">Net Balance (g)</div><div class="value ${netBalance >= 0 ? 'green' : 'red'}">${fmtNum(netBalance)}</div></div>
+  `;
+  document.getElementById('receiptsTbody').innerHTML = lastLoadedReceipts.map((r, idx) => `
+    <tr>
+      <td>${fmtDate(r.receipt_date)}</td>
+      <td>${fmtNum(r.weight_grams)}</td>
+      <td>${fmtNum(r.karat)}</td>
+      <td>${r.fine_weight_credit_type === 'BREAD' ? 'Bread' : 'Fine'}</td>
+      <td>${fmtNum(r.fine_gold_grams)}</td>
+      <td>${escapeHtml(r.note||'—')}</td>
+      <td><button class="btn small danger" onclick="deleteReceiptByIndex(${idx})">Delete</button></td>
+    </tr>
+  `).join('') || '<tr><td colspan="7" class="empty-state">No gold receipts recorded yet.</td></tr>';
+}
+
+document.getElementById('receiptForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!currentLedgerCustomer) return;
+  const body = {
+    customer_id: currentLedgerCustomer.id,
+    receipt_date: document.getElementById('rDate').value,
+    weight_grams: parseFloat(document.getElementById('rWeight').value) || null,
+    karat: parseFloat(document.getElementById('rKarat').value) || null,
+    fine_weight_credit_type: document.getElementById('rType').value,
+    note: document.getElementById('rNote').value.trim() || null,
+  };
+  try {
+    await api('/api/gold-receipts', { method: 'POST', body });
+    document.getElementById('rWeight').value = '';
+    document.getElementById('rKarat').value = '';
+    document.getElementById('rNote').value = '';
+    await loadLedgerSummaryAndReceipts();
+  } catch (err) { alert(err.message); }
+});
+
+async function deleteReceiptByIndex(idx) {
+  const r = lastLoadedReceipts[idx];
+  if (!r || !confirm('Delete this gold receipt?')) return;
+  try { await api(`/api/gold-receipts/${r.id}`, { method: 'DELETE' }); await loadLedgerSummaryAndReceipts(); } catch (err) { alert(err.message); }
+}
+
+function exportCustomersExcel() {
+  const headers = ['Code','Name','Firm','City','State','Phone','GST Number','Package Count','Balance (g)','Notes'];
+  const rows = customers.map(c => [c.code, c.name, c.firm_name, c.city, c.state, c.phone_number, c.gst_number, packages.filter(p => p.customer_id === c.id).length, balanceByCustomer[c.id] || 0, c.notes]);
+  exportRowsToExcel('sk-jewellers-customers.xlsx', 'Customers', headers, rows);
+}
+function exportCustomersPdf() {
+  const headers = ['Code','Name','Firm','City','State','Phone','GST Number','Packages','Balance (g)'];
+  const rows = customers.map(c => [c.code, c.name, c.firm_name, c.city, c.state, c.phone_number, c.gst_number, packages.filter(p => p.customer_id === c.id).length, balanceByCustomer[c.id] || 0]);
+  exportRowsToPdf('sk-jewellers-customers.pdf', 'SK Jewellers — Customers Export', headers, rows);
+}
+
+let currentPhotoCustomer = null;
+function openCustomerModal(c) {
+  document.getElementById('modalTitle').textContent = c ? 'Edit Customer' : 'Add Customer';
+  document.getElementById('custId').value = c ? c.id : '';
+  document.getElementById('code').value = c ? c.code : '';
+  document.getElementById('name').value = c ? c.name : '';
+  document.getElementById('firm_name').value = c ? (c.firm_name||'') : '';
+  document.getElementById('city').value = c ? (c.city||'') : '';
+  document.getElementById('state').value = c ? (c.state||'') : '';
+  document.getElementById('phone_number').value = c ? (c.phone_number||'') : '';
+  document.getElementById('gst_number').value = c ? (c.gst_number||'') : '';
+  document.getElementById('notes').value = c ? (c.notes||'') : '';
+  document.getElementById('formError').innerHTML = '';
+  currentPhotoCustomer = c || null;
+  document.getElementById('custPhotoSection').style.display = c ? '' : 'none';
+  const preview = document.getElementById('custPhotoPreview');
+  if (c && c.profile_photo_path) { preview.src = '/uploads/' + c.profile_photo_path; preview.style.display = ''; }
+  else { preview.style.display = 'none'; }
+  document.getElementById('custPhotoFile').value = '';
+  document.getElementById('modalOverlay').classList.add('open');
+}
+function closeModal() { document.getElementById('modalOverlay').classList.remove('open'); }
+
+async function uploadCustomerPhoto() {
+  const fileInput = document.getElementById('custPhotoFile');
+  if (!currentPhotoCustomer) { alert('Save the customer first, then upload a photo.'); return; }
+  if (!fileInput.files[0]) { alert('Choose a photo first.'); return; }
+  const fd = new FormData();
+  fd.append('file', fileInput.files[0]);
+  fd.append('customer_id', currentPhotoCustomer.id);
+  fd.append('type', 'PHOTO');
+  fd.append('is_profile_photo', '1');
+  fd.append('note', 'Profile photo');
+  try {
+    const result = await apiUpload('/api/attachments', fd);
+    document.getElementById('custPhotoPreview').src = '/uploads/' + result.file_path;
+    document.getElementById('custPhotoPreview').style.display = '';
+    await loadAll();
+  } catch (err) { alert(err.message); }
+}
+
+document.getElementById('custForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('custId').value;
+  const body = {
+    code: document.getElementById('code').value.trim(),
+    name: document.getElementById('name').value.trim(),
+    firm_name: document.getElementById('firm_name').value.trim(),
+    city: document.getElementById('city').value.trim(),
+    state: document.getElementById('state').value.trim(),
+    phone_number: document.getElementById('phone_number').value.trim(),
+    gst_number: document.getElementById('gst_number').value.trim(),
+    notes: document.getElementById('notes').value.trim(),
+  };
+  try {
+    if (id) await api(`/api/customers/${id}`, { method: 'PUT', body });
+    else await api('/api/customers', { method: 'POST', body });
+    closeModal();
+    await loadAll();
+  } catch (err) {
+    document.getElementById('formError').innerHTML = `<div class="error-msg">${escapeHtml(err.message)}</div>`;
+  }
+});
+
+async function deleteCustomer(id) {
+  if (!confirm('Delete this customer? This cannot be undone. (Note: existing packages referencing this customer may need to be removed first.)')) return;
+  try {
+    await api(`/api/customers/${id}`, { method: 'DELETE' });
+    await loadAll();
+  } catch (err) { alert(err.message); }
+}
+</script>
+</body>
+</html>

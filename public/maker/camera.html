@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Camera Capture — SK Jewellers</title>
+<link rel="stylesheet" href="/common.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js"></script>
+</head>
+<body>
+<div id="topbarMount"></div>
+<div class="container">
+  <h1>Camera Capture — Paper Register to Digital</h1>
+  <p class="subtitle">Photograph a page from the paper register. Save the photo as-is, or let AI/OCR try to read the text so you can turn it into a package entry.</p>
+
+  <div class="camera-area">
+    <input type="file" id="fileInput" accept="image/*" capture="environment" style="display:none;">
+    <div id="preCapture">
+      <p class="muted">Use your phone/webcam camera, or choose an existing photo.</p>
+      <button class="btn" onclick="document.getElementById('fileInput').click()">📷 Take / Choose Photo</button>
+    </div>
+    <div id="postCapture" style="display:none;">
+      <img id="previewImg" class="preview" alt="Captured photo">
+      <div class="row" style="justify-content:center; margin-top:10px;">
+        <button class="btn secondary" onclick="retake()">Retake</button>
+      </div>
+
+      <div class="row" style="justify-content:center; margin-top:18px; gap:16px;">
+        <div class="card" style="max-width:260px;">
+          <div class="label">Option 1</div>
+          <p class="muted" style="font-size:0.85rem;">Save this photo directly as an attachment to a customer or package record.</p>
+          <div class="field" style="margin-bottom:8px;"><label>Attach to Customer</label><select id="attachCustomer"></select></div>
+          <div class="field" style="margin-bottom:8px;"><label>Or specific Package (optional)</label><select id="attachPackage"><option value="">— Customer only —</option></select></div>
+          <button class="btn" onclick="saveDirectly()">Save Photo</button>
+          <div id="saveDirectStatus"></div>
+        </div>
+        <div class="card" style="max-width:260px;">
+          <div class="label">Option 2</div>
+          <p class="muted" style="font-size:0.85rem;">Run free OCR to extract text from the photo, then review and turn it into a new package entry.</p>
+          <button class="btn secondary" onclick="runOcr()">Run OCR &amp; Extract Text</button>
+          <div id="ocrStatus" class="muted" style="margin-top:8px; font-size:0.8rem;"></div>
+        </div>
+      </div>
+
+      <div id="ocrResultBox" style="display:none; text-align:left; margin-top:18px;">
+        <h3>Extracted Text (please review &amp; correct)</h3>
+        <textarea id="ocrText" rows="6" style="width:100%;"></textarea>
+        <p class="muted" style="margin-top:8px;">OCR on handwriting is imperfect — correct any mistakes above, then fill in the package fields below and save.</p>
+        <button class="btn" style="margin-top:10px;" onclick="goToNewPackageWithNotes()">Create Package Entry from This →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/common.js"></script>
+<script>
+let me, capturedFile = null, customers = [];
+(async function init() {
+  me = await requireUser(['OWNER','MAKER']);
+  if (!me) return;
+  document.getElementById('topbarMount').innerHTML = buildTopbar(me, '/' + me.role.toLowerCase() + '/camera.html');
+  customers = await api('/api/customers');
+  document.getElementById('attachCustomer').innerHTML = customers.map(c => `<option value="${c.id}">${escapeHtml(c.code)} — ${escapeHtml(c.name)}</option>`).join('');
+  document.getElementById('attachCustomer').addEventListener('change', loadPackagesForCustomer);
+  await loadPackagesForCustomer();
+})();
+
+async function loadPackagesForCustomer() {
+  const custId = document.getElementById('attachCustomer').value;
+  if (!custId) { document.getElementById('attachPackage').innerHTML = '<option value="">— Customer only —</option>'; return; }
+  const pkgs = await api(`/api/packages?customerId=${custId}`);
+  document.getElementById('attachPackage').innerHTML = '<option value="">— Customer only —</option>' +
+    pkgs.map(p => `<option value="${p.id}">${escapeHtml(p.package_code)}</option>`).join('');
+}
+
+document.getElementById('fileInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  capturedFile = file;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    document.getElementById('previewImg').src = ev.target.result;
+    document.getElementById('preCapture').style.display = 'none';
+    document.getElementById('postCapture').style.display = 'block';
+    document.getElementById('ocrResultBox').style.display = 'none';
+    document.getElementById('saveDirectStatus').innerHTML = '';
+    document.getElementById('ocrStatus').textContent = '';
+  };
+  reader.readAsDataURL(file);
+});
+
+function retake() {
+  capturedFile = null;
+  document.getElementById('fileInput').value = '';
+  document.getElementById('preCapture').style.display = 'block';
+  document.getElementById('postCapture').style.display = 'none';
+}
+
+async function saveDirectly() {
+  if (!capturedFile) return;
+  const fd = new FormData();
+  fd.append('file', capturedFile);
+  const custId = document.getElementById('attachCustomer').value;
+  const pkgId = document.getElementById('attachPackage').value;
+  if (pkgId) fd.append('package_id', pkgId); else fd.append('customer_id', custId);
+  fd.append('type', 'PHOTO');
+  fd.append('note', 'Captured via Camera Capture feature');
+  try {
+    await apiUpload('/api/attachments', fd);
+    document.getElementById('saveDirectStatus').innerHTML = `<div class="success-msg" style="margin-top:8px;">Saved! View it on the customer's or package's attachment list.</div>`;
+  } catch (err) {
+    document.getElementById('saveDirectStatus').innerHTML = `<div class="error-msg" style="margin-top:8px;">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function runOcr() {
+  if (!capturedFile) return;
+  const statusEl = document.getElementById('ocrStatus');
+  statusEl.textContent = 'Reading image with OCR… this runs free, in your browser, may take 10-30s.';
+  try {
+    const result = await Tesseract.recognize(document.getElementById('previewImg').src, 'eng', {
+      logger: (m) => { if (m.status === 'recognizing text') statusEl.textContent = `Reading… ${Math.round(m.progress*100)}%`; }
+    });
+    document.getElementById('ocrText').value = result.data.text.trim();
+    document.getElementById('ocrResultBox').style.display = 'block';
+    statusEl.textContent = 'Done. Review the text below.';
+  } catch (err) {
+    statusEl.textContent = 'OCR failed: ' + err.message;
+  }
+}
+
+function goToNewPackageWithNotes() {
+  const text = document.getElementById('ocrText').value;
+  sessionStorage.setItem('ocrDraftNotes', text);
+  const targetPage = me.role === 'OWNER' ? '/owner/packages.html' : '/maker/';
+  alert('OCR text saved. Opening the Orders page — paste/review the extracted text into the Remarks field while filling in the package details.');
+  window.location.href = targetPage;
+}
+</script>
+</body>
+</html>

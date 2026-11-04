@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin / Config — SK Jewellers</title>
+<link rel="stylesheet" href="/common.css">
+</head>
+<body>
+<div id="topbarMount"></div>
+<div class="container">
+  <h1>Admin / Configuration</h1>
+  <p class="subtitle">Full admin control — manage users, documents, and dropdown options without any code changes</p>
+
+  <div class="tabs">
+    <button class="active" data-tab="users" onclick="switchTab('users')">Users &amp; Roles</button>
+    <button data-tab="employees" onclick="switchTab('employees')">Employees</button>
+    <button data-tab="commissions" onclick="switchTab('commissions')">Maker Commissions</button>
+    <button data-tab="lists" onclick="switchTab('lists')">Dropdown Lists</button>
+    <button data-tab="docs" onclick="switchTab('docs')">Customer Documents</button>
+    <button data-tab="settings" onclick="switchTab('settings')">Settings</button>
+  </div>
+
+  <!-- USERS TAB -->
+  <div id="tabUsers">
+    <div class="row" style="justify-content:space-between; margin-bottom:12px;">
+      <p class="muted">Add Owners, Makers, or Customer-login accounts. Customer accounts link to a customer record so that person only sees their own orders.</p>
+      <button class="btn" onclick="openUserModal()">+ Add User</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Linked Customer</th><th></th></tr></thead>
+        <tbody id="usersTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- EMPLOYEES TAB -->
+  <div id="tabEmployees" style="display:none;">
+    <p class="muted" style="margin-bottom:14px;">Full employee profiles for your Makers — contact info, ID proof, bank details, and documents. Click a maker to edit their profile (same form as the Users tab, with the profile fields visible).</p>
+    <div class="cards" id="employeesCards"></div>
+  </div>
+
+  <!-- MAKER COMMISSIONS TAB -->
+  <div id="tabCommissions" style="display:none;">
+    <p class="muted" style="margin-bottom:14px;">Gold commission automatically earned by each Maker when they deliver an order (rate set in Settings). Mark entries paid once settled — this is separate from weekly cash salary, which is tracked outside the app.</p>
+    <div class="cards" id="commissionSummaryCards" style="margin-bottom:16px;"></div>
+    <div class="filters">
+      <div class="field"><label>Maker</label><select id="commissionMakerFilter" onchange="loadCommissions()"><option value="">All Makers</option></select></div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Maker</th><th>Package</th><th>Base Weight (g)</th><th>Rate Used (%)</th><th>Commission (g)</th><th>Date Earned</th><th>Paid?</th><th></th></tr></thead>
+        <tbody id="commissionsTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- LISTS TAB -->
+  <div id="tabLists" style="display:none;">
+    <p class="muted" style="margin-bottom:14px;">These are the dropdown options used throughout the app (package status, karat options, etc). Add new values here — no developer needed.</p>
+    <div class="cards" id="listsCards"></div>
+  </div>
+
+  <!-- DOCS TAB -->
+  <div id="tabDocs" style="display:none;">
+    <p class="muted" style="margin-bottom:14px;">Upload important documents (ID proofs, agreements, receipts) tied to a customer, separate from package photos.</p>
+    <div class="filters">
+      <div class="field"><label>Customer</label><select id="docCustomer"></select></div>
+    </div>
+    <form id="docUploadForm" class="row" style="margin-bottom:16px;">
+      <input type="file" id="docFile" required>
+      <input id="docNote" placeholder="Document note (e.g. 'GST certificate')" style="flex:1;">
+      <button class="btn small">Upload Document</button>
+    </form>
+    <div id="docsList" class="row" style="flex-wrap:wrap;"></div>
+  </div>
+
+  <!-- SETTINGS TAB -->
+  <div id="tabSettings" style="display:none;">
+    <div class="cards">
+      <div class="card" style="max-width:480px;">
+        <div class="label">Live Gold / Silver Price</div>
+        <p class="muted" style="margin:8px 0 14px;">Choose the country whose currency the live gold/silver price widget (shown on the Dashboard) should display. This is a single shop-wide setting — everyone sees the same rate.</p>
+        <form id="settingsForm" class="stack">
+          <div class="field">
+            <label>Country / Currency</label>
+            <select id="settingsCountry"></select>
+          </div>
+          <button class="btn" style="width:fit-content;" type="submit">Save Setting</button>
+        </form>
+        <div id="settingsStatus" class="muted" style="margin-top:10px;"></div>
+      </div>
+
+      <div class="card" style="max-width:480px;">
+        <div class="label">Maker Gold Commission Rate</div>
+        <p class="muted" style="margin:8px 0 14px;">What percentage of a delivered order's weight is paid to the assigned Maker as gold commission. For example, a rate of 0.2% on a 100g delivered order pays 200mg (0.2g) of gold. Applies to every Maker company-wide. Changing this only affects orders delivered from now on — past commission entries keep the rate that was in effect when they were earned.</p>
+        <form id="commissionRateForm" class="stack">
+          <div class="field">
+            <label>Commission Rate (%)</label>
+            <input type="number" step="0.01" id="commissionRate" placeholder="e.g. 0.2">
+          </div>
+          <button class="btn" style="width:fit-content;" type="submit">Save Rate</button>
+        </form>
+        <div id="commissionRateStatus" class="muted" style="margin-top:10px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- User Modal -->
+<div class="modal-overlay" id="userModalOverlay">
+  <div class="modal" style="max-width:640px;">
+    <h3 id="userModalTitle">Add User</h3>
+    <form id="userForm">
+      <input type="hidden" id="userId">
+      <div class="form-grid">
+        <div class="field full"><label>Name *</label><input id="uName" required></div>
+        <div class="field full"><label>Email *</label><input id="uEmail" type="email" required></div>
+        <div class="field full"><label>Password ${'*'} <span class="muted" id="pwHint"></span></label><input id="uPassword" type="text"></div>
+        <div class="field"><label>Role *</label>
+          <select id="uRole" onchange="toggleCustomerLink()">
+            <option value="OWNER">Owner / Admin</option>
+            <option value="MAKER">Maker</option>
+            <option value="CUSTOMER">Customer</option>
+          </select>
+        </div>
+        <div class="field" id="customerLinkField"><label>Linked Customer</label><select id="uCustomerId"></select></div>
+      </div>
+
+      <!-- Employee profile fields — shown for Maker (employee) accounts. Owner accounts
+           could technically have these too, but they're mainly useful for employee records. -->
+      <div id="employeeProfileSection" style="display:none;">
+        <h4 style="margin:18px 0 8px; border-top:1px solid var(--border); padding-top:14px;">Employee Profile</h4>
+        <div class="form-grid">
+          <div class="field"><label>Phone Number</label><input id="uPhone"></div>
+          <div class="field"><label>Date of Birth</label><input id="uDob" type="date"></div>
+          <div class="field full"><label>Address / Location</label><input id="uAddress"></div>
+          <div class="field"><label>Blood Group</label>
+            <select id="uBloodGroup">
+              <option value="">— Not set —</option>
+              <option>A+</option><option>A-</option><option>B+</option><option>B-</option>
+              <option>AB+</option><option>AB-</option><option>O+</option><option>O-</option>
+            </select>
+          </div>
+          <div class="field"><label>Bank Name</label><input id="uBankName"></div>
+          <div class="field"><label>Bank Account Number</label><input id="uBankAccount"></div>
+          <div class="field"><label>Bank IFSC Code</label><input id="uBankIfsc"></div>
+        </div>
+
+        <div id="employeeDocsSection" style="display:none;">
+          <h4 style="margin:18px 0 8px; border-top:1px solid var(--border); padding-top:14px;">Photo &amp; Supporting Documents</h4>
+          <p class="muted" style="margin:0 0 10px;">Upload a profile photo, ID proof, or any other supporting document for this employee. These are only visible to the Owner.</p>
+          <div class="row" style="margin-bottom:12px; align-items:center;">
+            <img id="empPhotoPreview" class="photo-thumb" style="width:50px;height:50px;display:none;">
+            <input type="file" id="empDocFile">
+            <select id="empDocType" onchange="toggleEmpProfilePhotoCheckbox()"><option value="PHOTO">Photo</option><option value="DOCUMENT">ID Proof / Document</option></select>
+            <label class="muted" style="font-size:0.8rem; display:flex; align-items:center; gap:4px;" id="empProfilePhotoLabel">
+              <input type="checkbox" id="empIsProfilePhoto" checked style="width:auto;"> Set as profile photo
+            </label>
+            <input id="empDocNote" placeholder="Note (e.g. 'Aadhaar card')" style="flex:1;">
+            <button type="button" class="btn small" onclick="uploadEmployeeDoc()">Upload</button>
+          </div>
+          <div id="employeeDocsList" class="row" style="flex-wrap:wrap;"></div>
+        </div>
+      </div>
+
+      <div id="userFormError"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn secondary" onclick="closeUserModal()">Cancel</button>
+        <button type="submit" class="btn">Save User</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="/common.js"></script>
+<script>
+let me, customers = [];
+(async function init() {
+  me = await requireUser(['OWNER']);
+  if (!me) return;
+  document.getElementById('topbarMount').innerHTML = buildTopbar(me, '/owner/admin.html');
+  customers = await api('/api/customers');
+  document.getElementById('uCustomerId').innerHTML = customers.map(c => `<option value="${c.id}">${escapeHtml(c.code)} — ${escapeHtml(c.name)}</option>`).join('');
+  document.getElementById('docCustomer').innerHTML = customers.map(c => `<option value="${c.id}">${escapeHtml(c.code)} — ${escapeHtml(c.name)}</option>`).join('');
+  await loadUsers();
+  await loadEmployees();
+  await loadLists();
+  await loadDocs();
+  await loadSettings();
+  await loadCommissions();
+  document.getElementById('docCustomer').addEventListener('change', loadDocs);
+})();
+
+function switchTab(tab) {
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.getElementById('tabUsers').style.display = tab === 'users' ? '' : 'none';
+  document.getElementById('tabEmployees').style.display = tab === 'employees' ? '' : 'none';
+  document.getElementById('tabCommissions').style.display = tab === 'commissions' ? '' : 'none';
+  document.getElementById('tabLists').style.display = tab === 'lists' ? '' : 'none';
+  document.getElementById('tabDocs').style.display = tab === 'docs' ? '' : 'none';
+  document.getElementById('tabSettings').style.display = tab === 'settings' ? '' : 'none';
+}
+
+// ---- Maker Commission Ledger (Use Case 3) ----
+let lastLoadedCommissions = [];
+async function loadCommissions() {
+  const makerSel = document.getElementById('commissionMakerFilter');
+  if (!makerSel.dataset.loaded) {
+    makerSel.innerHTML = '<option value="">All Makers</option>' +
+      lastLoadedEmployees.map(u => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('');
+    makerSel.dataset.loaded = '1';
+  }
+  const makerId = makerSel.value;
+  const rows = await api('/api/maker-commissions' + (makerId ? `?makerId=${makerId}` : ''));
+  lastLoadedCommissions = rows;
+
+  const totalEarned = rows.reduce((s, r) => s + (r.commission_fine_gold_grams || 0), 0);
+  const totalUnpaid = rows.filter(r => !r.paid).reduce((s, r) => s + (r.commission_fine_gold_grams || 0), 0);
+  document.getElementById('commissionSummaryCards').innerHTML = `
+    <div class="card"><div class="label">Total Commission Earned (g)</div><div class="value">${fmtNum(totalEarned)}</div></div>
+    <div class="card"><div class="label">Unpaid Balance (g)</div><div class="value ${totalUnpaid > 0 ? 'gold' : 'green'}">${fmtNum(totalUnpaid)}</div></div>
+    <div class="card"><div class="label">Entries</div><div class="value">${rows.length}</div></div>
+  `;
+
+  document.getElementById('commissionsTbody').innerHTML = rows.map((r, idx) => `
+    <tr>
+      <td>${escapeHtml(r.maker_name||'—')}</td>
+      <td>${escapeHtml(r.package_code||'—')}</td>
+      <td>${fmtNum(r.base_weight_grams)}</td>
+      <td>${fmtNum(r.rate_percent_used)}%</td>
+      <td><strong>${fmtNum(r.commission_fine_gold_grams)}</strong></td>
+      <td>${fmtDate(r.created_at)}</td>
+      <td>${r.paid ? '<span class="badge DELIVERED">Paid</span>' : '<span class="badge IN_PROGRESS">Unpaid</span>'}</td>
+      <td>${r.paid
+        ? `<button class="btn small secondary" onclick="toggleCommissionPaid(${idx}, false)">Mark Unpaid</button>`
+        : `<button class="btn small" onclick="toggleCommissionPaid(${idx}, true)">Mark Paid</button>`}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="8" class="empty-state">No commission entries yet — these are created automatically when a Maker delivers an assigned order.</td></tr>';
+}
+
+async function toggleCommissionPaid(idx, paid) {
+  const entry = lastLoadedCommissions[idx];
+  if (!entry) return;
+  try { await api(`/api/maker-commissions/${entry.id}`, { method: 'PUT', body: { paid } }); await loadCommissions(); } catch (err) { alert(err.message); }
+}
+
+// ---- Settings: country/currency for the shop-wide live metal price widget ----
+// A small curated list rather than every ISO country — covers the markets this kind
+// of jewellery business realistically operates in or sources gold prices for.
+const COUNTRY_CURRENCY_OPTIONS = [
+  ['IN', 'INR', 'India (INR)'], ['US', 'USD', 'United States (USD)'], ['GB', 'GBP', 'United Kingdom (GBP)'],
+  ['AE', 'AED', 'UAE (AED)'], ['SA', 'SAR', 'Saudi Arabia (SAR)'], ['SG', 'SGD', 'Singapore (SGD)'],
+  ['AU', 'AUD', 'Australia (AUD)'], ['CA', 'CAD', 'Canada (CAD)'], ['EU', 'EUR', 'Eurozone (EUR)'],
+];
+
+async function loadSettings() {
+  document.getElementById('settingsCountry').innerHTML = COUNTRY_CURRENCY_OPTIONS
+    .map(([code, , label]) => `<option value="${code}">${escapeHtml(label)}</option>`).join('');
+  const s = await api('/api/settings');
+  document.getElementById('settingsCountry').value = s.metal_price_country || 'IN';
+  document.getElementById('commissionRate').value = s.maker_commission_rate_percent || '0.2';
+}
+
+document.getElementById('commissionRateForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const rate = document.getElementById('commissionRate').value;
+  try {
+    await api('/api/settings', { method: 'PUT', body: { maker_commission_rate_percent: rate } });
+    document.getElementById('commissionRateStatus').textContent = 'Saved — new deliveries will use a ' + rate + '% commission rate.';
+  } catch (err) {
+    document.getElementById('commissionRateStatus').textContent = 'Error: ' + err.message;
+  }
+});
+
+document.getElementById('settingsForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const code = document.getElementById('settingsCountry').value;
+  const match = COUNTRY_CURRENCY_OPTIONS.find(o => o[0] === code);
+  const currency = match ? match[1] : 'INR';
+  try {
+    await api('/api/settings', { method: 'PUT', body: { metal_price_country: code, metal_price_currency: currency } });
+    document.getElementById('settingsStatus').textContent = 'Saved — the Dashboard price widget will use ' + currency + '.';
+  } catch (err) {
+    document.getElementById('settingsStatus').textContent = 'Error: ' + err.message;
+  }
+});
+
+// ---- Employees (Makers) tab — a friendlier card view onto the same user records ----
+let lastLoadedEmployees = [];
+async function loadEmployees() {
+  const users = await api('/api/users');
+  lastLoadedEmployees = users.filter(u => u.role === 'MAKER');
+  document.getElementById('employeesCards').innerHTML = lastLoadedEmployees.map((u, idx) => `
+    <div class="card">
+      <div class="row" style="align-items:center; margin-bottom:6px;">
+        ${u.profile_photo_path
+          ? `<img class="photo-thumb" style="width:48px;height:48px;" src="/uploads/${u.profile_photo_path}">`
+          : `<div class="photo-thumb" style="width:48px;height:48px;background:#f4f0e6;display:flex;align-items:center;justify-content:center;font-size:1rem;">${escapeHtml((u.name||'?').charAt(0).toUpperCase())}</div>`}
+        <div class="label" style="margin:0;">${escapeHtml(u.name)}</div>
+      </div>
+      <div class="muted" style="margin:6px 0; font-size:0.85rem;">
+        ${u.phone_number ? '📞 ' + escapeHtml(u.phone_number) + '<br>' : ''}
+        ${u.date_of_birth ? '🎂 ' + escapeHtml(u.date_of_birth) + '<br>' : ''}
+        ${u.blood_group ? '🩸 ' + escapeHtml(u.blood_group) + '<br>' : ''}
+        ${u.address ? '📍 ' + escapeHtml(u.address) + '<br>' : ''}
+        ${u.bank_name ? '🏦 ' + escapeHtml(u.bank_name) + (u.bank_account_number ? ' · ' + escapeHtml(u.bank_account_number) : '') + '<br>' : ''}
+        ${!u.phone_number && !u.date_of_birth && !u.blood_group && !u.address && !u.bank_name ? 'No profile details yet.' : ''}
+      </div>
+      <button class="btn small secondary" onclick="openUserModalByEmployeeIndex(${idx})">Edit Profile</button>
+    </div>
+  `).join('') || '<p class="muted">No Maker (employee) accounts yet. Add one from the Users &amp; Roles tab.</p>';
+}
+function openUserModalByEmployeeIndex(idx) { openUserModal(lastLoadedEmployees[idx]); }
+
+// ---- Users ----
+let lastLoadedUsers = [];
+async function loadUsers() {
+  const users = await api('/api/users');
+  lastLoadedUsers = users;
+  document.getElementById('usersTbody').innerHTML = users.map((u, idx) => {
+    const cust = customers.find(c => c.id === u.customer_id);
+    return `<tr>
+      <td>${escapeHtml(u.name)}</td>
+      <td>${escapeHtml(u.email)}</td>
+      <td>${escapeHtml(u.role)}</td>
+      <td>${cust ? escapeHtml(cust.code) + ' — ' + escapeHtml(cust.name) : '—'}</td>
+      <td class="row">
+        <button class="btn small secondary" onclick="openUserModalByIndex(${idx})">Edit</button>
+        <button class="btn small danger" onclick="deleteUser(${u.id})">Delete</button>
+      </td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="5" class="empty-state">No users yet.</td></tr>';
+}
+
+// See note in packages.html: avoid inlining JSON into onclick="..." attributes, since
+// an apostrophe/quote in any field (name, etc.) would break the HTML and hide the
+// row's buttons. Look the row up from the lastLoadedUsers array by index instead.
+function openUserModalByIndex(idx) { openUserModal(lastLoadedUsers[idx]); }
+
+function toggleCustomerLink() {
+  document.getElementById('customerLinkField').style.display = document.getElementById('uRole').value === 'CUSTOMER' ? '' : 'none';
+  toggleEmployeeSection();
+}
+function toggleEmployeeSection() {
+  const isMaker = document.getElementById('uRole').value === 'MAKER';
+  document.getElementById('employeeProfileSection').style.display = isMaker ? '' : 'none';
+  const id = document.getElementById('userId').value;
+  document.getElementById('employeeDocsSection').style.display = (isMaker && id) ? '' : 'none';
+}
+
+function openUserModal(u) {
+  document.getElementById('userModalTitle').textContent = u ? 'Edit User' : 'Add User';
+  document.getElementById('userId').value = u ? u.id : '';
+  document.getElementById('uName').value = u ? u.name : '';
+  document.getElementById('uEmail').value = u ? u.email : '';
+  document.getElementById('uPassword').value = '';
+  document.getElementById('pwHint').textContent = u ? '(leave blank to keep current password)' : '';
+  document.getElementById('uRole').value = u ? u.role : 'MAKER';
+  document.getElementById('uCustomerId').value = u ? (u.customer_id || '') : '';
+  document.getElementById('uPhone').value = u ? (u.phone_number || '') : '';
+  document.getElementById('uDob').value = u ? (u.date_of_birth || '') : '';
+  document.getElementById('uAddress').value = u ? (u.address || '') : '';
+  document.getElementById('uBloodGroup').value = u ? (u.blood_group || '') : '';
+  document.getElementById('uBankName').value = u ? (u.bank_name || '') : '';
+  document.getElementById('uBankAccount').value = u ? (u.bank_account_number || '') : '';
+  document.getElementById('uBankIfsc').value = u ? (u.bank_ifsc || '') : '';
+  toggleCustomerLink();
+  if (u) loadEmployeeDocs(u.id); else document.getElementById('employeeDocsList').innerHTML = '';
+  const empPreview = document.getElementById('empPhotoPreview');
+  if (u && u.profile_photo_path) { empPreview.src = '/uploads/' + u.profile_photo_path; empPreview.style.display = ''; }
+  else { empPreview.style.display = 'none'; }
+  document.getElementById('empDocType').value = 'PHOTO';
+  toggleEmpProfilePhotoCheckbox();
+  document.getElementById('userFormError').innerHTML = '';
+  document.getElementById('userModalOverlay').classList.add('open');
+}
+function closeUserModal() { document.getElementById('userModalOverlay').classList.remove('open'); }
+
+function toggleEmpProfilePhotoCheckbox() {
+  const isPhoto = document.getElementById('empDocType').value === 'PHOTO';
+  document.getElementById('empProfilePhotoLabel').style.display = isPhoto ? '' : 'none';
+}
+
+// ---- Employee photo/document uploads (reuses the attachments system, scoped to employeeId) ----
+async function loadEmployeeDocs(employeeId) {
+  const rows = await api(`/api/attachments?employeeId=${employeeId}`);
+  document.getElementById('employeeDocsList').innerHTML = rows.map(a => `
+    <div style="text-align:center;">
+      ${a.type === 'PHOTO'
+        ? `<img class="photo-thumb" src="/uploads/${a.file_path}" alt="${escapeHtml(a.original_name)}">`
+        : `<a href="/uploads/${a.file_path}" target="_blank" class="photo-thumb" style="display:flex;align-items:center;justify-content:center;background:#f4f0e6; text-decoration:none;">📄</a>`}
+      <div class="muted" style="font-size:0.7rem; max-width:90px;">${escapeHtml(a.original_name)}${a.is_profile_photo ? ' ⭐' : ''}</div>
+      <div class="muted" style="font-size:0.7rem;">${escapeHtml(a.note||'')}</div>
+      <button type="button" class="btn small danger" style="margin-top:4px;" onclick="deleteEmployeeDoc(${a.id})">Remove</button>
+    </div>
+  `).join('') || '<p class="muted">No documents uploaded for this employee yet.</p>';
+}
+
+async function uploadEmployeeDoc() {
+  const employeeId = document.getElementById('userId').value;
+  const fileInput = document.getElementById('empDocFile');
+  if (!employeeId) { alert('Save the user first, then upload documents.'); return; }
+  if (!fileInput.files[0]) { alert('Choose a file first.'); return; }
+  const type = document.getElementById('empDocType').value;
+  const fd = new FormData();
+  fd.append('file', fileInput.files[0]);
+  fd.append('employee_id', employeeId);
+  fd.append('type', type);
+  fd.append('note', document.getElementById('empDocNote').value);
+  if (type === 'PHOTO' && document.getElementById('empIsProfilePhoto').checked) fd.append('is_profile_photo', '1');
+  try {
+    const result = await apiUpload('/api/attachments', fd);
+    fileInput.value = '';
+    document.getElementById('empDocNote').value = '';
+    if (result.is_profile_photo) {
+      document.getElementById('empPhotoPreview').src = '/uploads/' + result.file_path;
+      document.getElementById('empPhotoPreview').style.display = '';
+      await loadEmployees(); // refresh the thumbnail shown on the Employees tab cards
+    }
+    await loadEmployeeDocs(employeeId);
+  } catch (err) { alert(err.message); }
+}
+
+async function deleteEmployeeDoc(id) {
+  if (!confirm('Remove this document?')) return;
+  const employeeId = document.getElementById('userId').value;
+  try { await api(`/api/attachments/${id}`, { method: 'DELETE' }); await loadEmployeeDocs(employeeId); } catch (err) { alert(err.message); }
+}
+
+document.getElementById('userForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('userId').value;
+  const role = document.getElementById('uRole').value;
+  const body = {
+    name: document.getElementById('uName').value.trim(),
+    email: document.getElementById('uEmail').value.trim(),
+    role,
+    customer_id: role === 'CUSTOMER' ? Number(document.getElementById('uCustomerId').value) : null,
+    phone_number: document.getElementById('uPhone').value.trim() || null,
+    date_of_birth: document.getElementById('uDob').value || null,
+    address: document.getElementById('uAddress').value.trim() || null,
+    blood_group: document.getElementById('uBloodGroup').value || null,
+    bank_name: document.getElementById('uBankName').value.trim() || null,
+    bank_account_number: document.getElementById('uBankAccount').value.trim() || null,
+    bank_ifsc: document.getElementById('uBankIfsc').value.trim() || null,
+  };
+  const pw = document.getElementById('uPassword').value;
+  if (pw) body.password = pw;
+  if (!id && !pw) {
+    document.getElementById('userFormError').innerHTML = `<div class="error-msg">Password is required for a new user.</div>`;
+    return;
+  }
+  try {
+    let saved;
+    if (id) saved = await api(`/api/users/${id}`, { method: 'PUT', body });
+    else saved = await api('/api/users', { method: 'POST', body });
+    await loadUsers();
+    await loadEmployees();
+    if (!id && saved && saved.role === 'MAKER') {
+      // New Maker account — re-open the same modal in "edit" mode (now with an id)
+      // so the owner can immediately attach photo/documents without re-finding the user.
+      openUserModal(saved);
+    } else {
+      closeUserModal();
+    }
+  } catch (err) {
+    document.getElementById('userFormError').innerHTML = `<div class="error-msg">${escapeHtml(err.message)}</div>`;
+  }
+});
+
+async function deleteUser(id) {
+  if (!confirm('Delete this user account?')) return;
+  try { await api(`/api/users/${id}`, { method: 'DELETE' }); await loadUsers(); await loadEmployees(); } catch (err) { alert(err.message); }
+}
+
+// ---- Dropdown Lists ----
+const listLabels = { PACKAGE_STATUS: 'Package Status Options', LEDGER_STATUS: 'Ledger Status (Lena/Dena)', CREDIT_TYPE: 'Fine Weight Credit Type', KARAT_OPTIONS: 'Karat / Touch Options' };
+
+async function loadLists() {
+  const rows = await api('/api/config-lists');
+  const grouped = {};
+  for (const r of rows) { grouped[r.list_key] = grouped[r.list_key] || []; grouped[r.list_key].push(r); }
+  const keys = Object.keys(listLabels);
+  for (const k of keys) if (!grouped[k]) grouped[k] = [];
+  document.getElementById('listsCards').innerHTML = keys.map(key => `
+    <div class="card">
+      <div class="label">${listLabels[key] || key}</div>
+      <div class="pill-group" style="margin:10px 0;">
+        ${grouped[key].map(r => `<span class="pill">${escapeHtml(r.value)} <button onclick="deleteListItem(${r.id})">&times;</button></span>`).join('') || '<span class="muted">No options yet</span>'}
+      </div>
+      <form class="row" onsubmit="addListItem(event, '${key}')">
+        <input placeholder="New value" style="flex:1;" required>
+        <button class="btn small">Add</button>
+      </form>
+    </div>
+  `).join('');
+}
+
+async function addListItem(e, key) {
+  e.preventDefault();
+  const input = e.target.querySelector('input');
+  const value = input.value.trim();
+  if (!value) return;
+  try {
+    await api('/api/config-lists', { method: 'POST', body: { list_key: key, value } });
+    input.value = '';
+    await loadLists();
+  } catch (err) { alert(err.message); }
+}
+
+async function deleteListItem(id) {
+  try { await api(`/api/config-lists/${id}`, { method: 'DELETE' }); await loadLists(); } catch (err) { alert(err.message); }
+}
+
+// ---- Customer Documents ----
+async function loadDocs() {
+  const customerId = document.getElementById('docCustomer').value;
+  if (!customerId) { document.getElementById('docsList').innerHTML = ''; return; }
+  const rows = await api(`/api/attachments?customerId=${customerId}`);
+  document.getElementById('docsList').innerHTML = rows.map(a => `
+    <div style="text-align:center;">
+      ${a.type === 'PHOTO'
+        ? `<img class="photo-thumb" src="/uploads/${a.file_path}" alt="${escapeHtml(a.original_name)}">`
+        : `<a href="/uploads/${a.file_path}" target="_blank" class="photo-thumb" style="display:flex;align-items:center;justify-content:center;background:#f4f0e6; text-decoration:none;">📄</a>`}
+      <div class="muted" style="font-size:0.7rem; max-width:90px;">${escapeHtml(a.original_name)}</div>
+      <div class="muted" style="font-size:0.7rem;">${escapeHtml(a.note||'')}</div>
+      <button class="btn small danger" style="margin-top:4px;" onclick="deleteDoc(${a.id})">Remove</button>
+    </div>
+  `).join('') || '<p class="muted">No documents for this customer yet.</p>';
+}
+
+document.getElementById('docUploadForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fileInput = document.getElementById('docFile');
+  const customerId = document.getElementById('docCustomer').value;
+  if (!fileInput.files[0] || !customerId) return;
+  const fd = new FormData();
+  fd.append('file', fileInput.files[0]);
+  fd.append('customer_id', customerId);
+  fd.append('type', 'DOCUMENT');
+  fd.append('note', document.getElementById('docNote').value);
+  try {
+    await apiUpload('/api/attachments', fd);
+    fileInput.value = '';
+    document.getElementById('docNote').value = '';
+    await loadDocs();
+  } catch (err) { alert(err.message); }
+});
+
+async function deleteDoc(id) {
+  if (!confirm('Remove this document?')) return;
+  try { await api(`/api/attachments/${id}`, { method: 'DELETE' }); await loadDocs(); } catch (err) { alert(err.message); }
+}
+</script>
+</body>
+</html>

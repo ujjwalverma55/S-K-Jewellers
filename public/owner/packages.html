@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Orders / Packages — SK Jewellers</title>
+<link rel="stylesheet" href="/common.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+</head>
+<body>
+<div id="topbarMount"></div>
+<div class="container">
+  <div class="row" style="justify-content:space-between;">
+    <div>
+      <h1>Orders / Gold Packages</h1>
+      <p class="subtitle">Full package register — weight, karat, fine gold, making charge, due date, and Lena/Dena balance</p>
+    </div>
+    <button class="btn" onclick="openPkgModal()">+ New Package / Order</button>
+  </div>
+
+  <div class="filters">
+    <div class="field"><label>Customer</label><select id="fCustomer"><option value="">All</option></select></div>
+    <div class="field"><label>Status</label>
+      <select id="fStatus"><option value="">All</option><option value="IN_PROGRESS">In Progress</option><option value="DELIVERED">Delivered</option><option value="ON_HOLD">On Hold</option><option value="CANCELLED">Cancelled</option></select>
+    </div>
+    <div class="field"><label>Year</label><input id="fYear" placeholder="2024" style="width:90px;"></div>
+    <div class="field"><label>Month</label><input id="fMonth" placeholder="01-12" style="width:90px;"></div>
+    <div class="field"><label>Order Group</label><input id="fOrderGroup" placeholder="e.g. ORD-C001-01" style="width:150px;"></div>
+    <button class="btn secondary" onclick="loadPackages()">Apply Filters</button>
+    <button class="btn secondary" onclick="clearFilters()">Clear</button>
+    <div class="export-bar" style="margin-left:auto;">
+      <button class="btn secondary" onclick="exportTableExcel()">⬇ Export Excel</button>
+      <button class="btn secondary" onclick="exportTablePdf()">⬇ Export PDF</button>
+    </div>
+  </div>
+
+  <div id="groupSummaryBar"></div>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Package</th><th>Order Group</th><th>Customer</th><th>Weight/Karat</th><th>Fine Gold (g)</th><th>Making</th><th>Net Fine Gold</th>
+        <th>Ledger</th><th>Credit (g)</th><th>Balance (g)</th><th>Status</th><th>Due Date</th><th>Timeliness</th><th>HUID</th><th>Received By</th><th></th>
+      </tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Add/Edit Package Modal -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal" style="max-width:720px;">
+    <h3 id="modalTitle">New Package / Order</h3>
+    <form id="pkgForm">
+      <input type="hidden" id="pkgId">
+      <div class="form-grid">
+        <div class="field"><label>Customer *</label><select id="customer_id" required></select></div>
+        <div class="field"><label>Package Code *</label><input id="package_code" required placeholder="PKG-C001-06"></div>
+        <div class="field full" id="orderGroupField">
+          <label>Order Group (links multiple rings as one customer order)</label>
+          <div class="row">
+            <input id="order_group_code" placeholder="e.g. ORD-C001-01 — leave blank for a standalone order" style="flex:1;">
+            <select id="orderGroupSuggestions" onchange="applyOrderGroupSuggestion()" style="max-width:260px;"><option value="">Reuse existing group…</option></select>
+          </div>
+          <p class="muted" style="margin:4px 0 0;">Use this when one customer order is actually several individual rings of different weights (e.g. 10 rings at 1.5g + the rest at 2.5g). Give them all the same Order Group code — each ring still has its own weight, karat, and delivery status.</p>
+        </div>
+        <div class="field"><label>Package Weight (g)</label><input type="number" step="0.001" id="weight_grams"></div>
+        <div class="field"><label>Package Karat/Touch</label><select id="karat"></select></div>
+        <div class="field"><label>Making Karat/Touch</label><input type="number" step="0.01" id="making_karat"></div>
+        <div class="field"><label>Making Charge Fine Gold (g)</label><input type="number" step="0.001" id="making_charge_fine_gold_grams"></div>
+        <div class="field"><label>Credit Date</label><input type="date" id="credit_date"></div>
+        <div class="field"><label>Estimated Completion Date *</label><input type="date" id="estimated_completion_date" required></div>
+        <div class="field"><label>Ledger Status (Lena/Dena)</label><select id="ledger_status"></select></div>
+        <div class="field"><label>Credit Weight (g)</label><input type="number" step="0.001" id="credit_weight_grams"></div>
+        <div class="field"><label>Fine Weight Credit Type</label><select id="fine_weight_credit_type"></select></div>
+        <div class="field"><label>Credit Fine Gold (g)</label><input type="number" step="0.001" id="credit_fine_gold_grams"></div>
+        <div class="field"><label>Delivery Date</label><input type="date" id="delivery_date"></div>
+        <div class="field"><label>Package Status</label><select id="package_status"></select></div>
+        <div class="field"><label>HUID Number</label><input id="huid_number"></div>
+        <div class="field"><label>Assigned Maker</label><select id="assigned_maker_id"><option value="">Unassigned</option></select></div>
+        <div class="field" id="receivedByField" style="display:none;">
+          <label>Received By (Name) *</label>
+          <input id="received_by_name" placeholder="Name of person who received the order">
+        </div>
+        <div class="field full" id="lateReasonField" style="display:none;">
+          <label>Reason for Late Delivery *</label>
+          <textarea id="late_reason" rows="2" placeholder="e.g. customer changed design, gold supply delayed..."></textarea>
+        </div>
+        <div class="field full"><label>Remarks</label><textarea id="remarks" rows="2"></textarea></div>
+      </div>
+      <p class="muted">Fine gold and net balance are calculated automatically from weight × karat and making charge. The estimated completion date is required and is used to track on-time delivery performance.</p>
+      <div id="formError"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn secondary" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn">Save Package</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Package Detail Modal (production log + attachments) -->
+<div class="modal-overlay" id="detailOverlay">
+  <div class="modal" style="max-width:640px;">
+    <h3 id="detailTitle">Package Detail</h3>
+    <div class="row" style="margin-bottom:10px;">
+      <button class="btn small secondary" onclick="shareCurrentPkg()">📤 Share on WhatsApp</button>
+      <button class="btn small secondary" onclick="exportCurrentPkgSlip()">⬇ Order Slip (PDF)</button>
+    </div>
+    <div class="tabs">
+      <button class="active" data-tab="log" onclick="switchDetailTab('log')">Production Log</button>
+      <button data-tab="photos" onclick="switchDetailTab('photos')">Photos / Documents</button>
+    </div>
+    <div id="detailTabLog">
+      <div id="updatesList" class="stack" style="margin-bottom:12px;"></div>
+      <form id="updateForm" class="row">
+        <input id="updateNote" placeholder="Add a production note..." style="flex:1;" required>
+        <button class="btn small">Add</button>
+      </form>
+    </div>
+    <div id="detailTabPhotos" style="display:none;">
+      <div id="attachmentsList" class="row" style="margin-bottom:12px; flex-wrap:wrap;"></div>
+      <form id="attachForm" class="stack">
+        <input type="file" id="attachFile" accept="image/*,application/pdf" required>
+        <select id="attachType"><option value="PHOTO">Photo</option><option value="DOCUMENT">Document</option></select>
+        <input id="attachNote" placeholder="Note (optional)">
+        <button class="btn small">Upload</button>
+      </form>
+    </div>
+    <div class="modal-actions"><button type="button" class="btn secondary" onclick="closeDetail()">Close</button></div>
+  </div>
+</div>
+
+<script src="/common.js"></script>
+<script>
+let me, customers = [], makers = [], configLists = {}, currentPkgId = null, currentPkgData = null, lastLoadedRows = [];
+
+(async function init() {
+  me = await requireUser(['OWNER']);
+  if (!me) return;
+  document.getElementById('topbarMount').innerHTML = buildTopbar(me, '/owner/packages.html');
+  await loadLookups();
+  await loadPackages();
+  const ocrDraft = sessionStorage.getItem('ocrDraftNotes');
+  if (ocrDraft) {
+    openPkgModal();
+    document.getElementById('remarks').value = 'OCR extracted text (please review):\n' + ocrDraft;
+    sessionStorage.removeItem('ocrDraftNotes');
+  }
+})();
+
+async function loadLookups() {
+  customers = await api('/api/customers');
+  const users = await api('/api/users');
+  makers = users.filter(u => u.role === 'MAKER');
+  const lists = await api('/api/config-lists');
+  configLists = {};
+  for (const row of lists) {
+    configLists[row.list_key] = configLists[row.list_key] || [];
+    configLists[row.list_key].push(row.value);
+  }
+  // Filter dropdown
+  document.getElementById('fCustomer').innerHTML = '<option value="">All</option>' +
+    customers.map(c => `<option value="${c.id}">${escapeHtml(c.code)} — ${escapeHtml(c.name)}</option>`).join('');
+  // Form dropdowns
+  document.getElementById('customer_id').innerHTML = customers.map(c => `<option value="${c.id}">${escapeHtml(c.code)} — ${escapeHtml(c.name)}</option>`).join('');
+  document.getElementById('assigned_maker_id').innerHTML = '<option value="">Unassigned</option>' + makers.map(m => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('');
+  document.getElementById('karat').innerHTML = (configLists.KARAT_OPTIONS || ['58','75','92','99']).map(v => `<option value="${v}">${v}</option>`).join('');
+  document.getElementById('ledger_status').innerHTML = `<option value="LENA">Lena Hai (we owe customer)</option><option value="DENA">Dena Hai (customer owes us)</option>`;
+  document.getElementById('fine_weight_credit_type').innerHTML = `<option value="FINE">Fine</option><option value="BREAD">Bread</option>`;
+  document.getElementById('package_status').innerHTML = (configLists.PACKAGE_STATUS || ['IN_PROGRESS','DELIVERED','ON_HOLD','CANCELLED']).map(v => `<option value="${v}">${v.replace(/_/g,' ')}</option>`).join('');
+  document.getElementById('package_status').addEventListener('change', maybeShowLateReasonField);
+  document.getElementById('delivery_date').addEventListener('change', maybeShowLateReasonField);
+  document.getElementById('package_status').addEventListener('change', maybeShowReceivedByField);
+}
+
+function maybeShowLateReasonField() {
+  const status = document.getElementById('package_status').value;
+  const deliveryDate = document.getElementById('delivery_date').value;
+  const estimate = document.getElementById('estimated_completion_date').value;
+  const isLate = status === 'DELIVERED' && estimate && (deliveryDate ? deliveryDate > estimate : new Date().toISOString().slice(0,10) > estimate);
+  document.getElementById('lateReasonField').style.display = isLate ? '' : 'none';
+}
+
+function maybeShowReceivedByField() {
+  const status = document.getElementById('package_status').value;
+  document.getElementById('receivedByField').style.display = status === 'DELIVERED' ? '' : 'none';
+}
+
+function clearFilters() {
+  document.getElementById('fCustomer').value = '';
+  document.getElementById('fStatus').value = '';
+  document.getElementById('fYear').value = '';
+  document.getElementById('fMonth').value = '';
+  document.getElementById('fOrderGroup').value = '';
+  loadPackages();
+}
+
+async function loadPackages() {
+  const params = new URLSearchParams();
+  const c = document.getElementById('fCustomer').value;
+  const s = document.getElementById('fStatus').value;
+  const y = document.getElementById('fYear').value;
+  const m = document.getElementById('fMonth').value;
+  const g = document.getElementById('fOrderGroup').value.trim();
+  if (c) params.set('customerId', c);
+  if (s) params.set('status', s);
+  if (y) params.set('year', y);
+  if (m) params.set('month', m);
+  if (g) params.set('orderGroupCode', g);
+  const rows = await api('/api/packages?' + params.toString());
+  lastLoadedRows = rows;
+  renderGroupSummaryBar(rows, g);
+  document.getElementById('tbody').innerHTML = rows.map((p, idx) => `
+    <tr>
+      <td><strong>${escapeHtml(p.package_code)}</strong></td>
+      <td>${escapeHtml(p.order_group_code||'—')}</td>
+      <td>${escapeHtml(p.customer.code)}<br><span class="muted">${escapeHtml(p.customer.name)}</span></td>
+      <td>${fmtNum(p.weight_grams)} g @ ${fmtNum(p.karat)}k</td>
+      <td>${fmtNum(p.fine_gold_grams)}</td>
+      <td>${fmtNum(p.making_karat)}k / ${fmtNum(p.making_charge_fine_gold_grams)} g</td>
+      <td>${fmtNum(p.net_fine_gold_grams)}</td>
+      <td>${ledgerBadge(p.ledger_status)}</td>
+      <td>${fmtNum(p.credit_fine_gold_grams)}</td>
+      <td>${fmtNum(p.net_balance_fine_gold_grams)}</td>
+      <td>${statusBadge(p.package_status)}</td>
+      <td>${fmtDate(p.estimated_completion_date)}</td>
+      <td>${timelinessBadge(p.timeliness)}</td>
+      <td>${escapeHtml(p.huid_number||'—')}</td>
+      <td>${escapeHtml(p.received_by_name||'—')}</td>
+      <td class="row">
+        <button class="btn small secondary" onclick="openPkgModalByIndex(${idx})">Edit</button>
+        <button class="btn small secondary" onclick="openDetail(${p.id}, ${idx})">Log/Photos</button>
+        <button class="btn small danger" onclick="deletePkg(${p.id})">Delete</button>
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="16" class="empty-state">No packages match these filters.</td></tr>';
+}
+
+// Shows a small rollup card whenever the currently-filtered rows share order group
+// codes, so the owner can see at a glance that e.g. "ORD-C001-01: 12 rings, 100.0g
+// total" without manually adding up individual rows (Use Case 2).
+function renderGroupSummaryBar(rows, activeGroupFilter) {
+  const bar = document.getElementById('groupSummaryBar');
+  const groups = {};
+  for (const p of rows) {
+    if (!p.order_group_code) continue;
+    groups[p.order_group_code] = groups[p.order_group_code] || { count: 0, weight: 0 };
+    groups[p.order_group_code].count++;
+    groups[p.order_group_code].weight += (p.weight_grams || 0);
+  }
+  const keys = Object.keys(groups);
+  if (keys.length === 0) { bar.innerHTML = ''; return; }
+  bar.innerHTML = `<div class="cards" style="margin-bottom:16px;">` +
+    keys.map(k => `<div class="card"><div class="label">Order Group: ${escapeHtml(k)}</div>
+      <div style="font-size:0.85rem;">${groups[k].count} ring(s) · <strong>${fmtNum(groups[k].weight)} g</strong> total</div></div>`).join('') +
+    `</div>`;
+}
+
+// NOTE: row-action buttons above intentionally avoid embedding JSON directly inside
+// onclick="..." attributes. If any field (remarks, customer name, late reason, etc.)
+// ever contains an apostrophe or quote, that would break out of the HTML attribute and
+// corrupt the row's markup — silently hiding the buttons on that row and sometimes
+// every row after it. Looking the row up from lastLoadedRows by index avoids this
+// entirely, regardless of what characters appear in the data.
+function openPkgModalByIndex(idx) { openPkgModal(lastLoadedRows[idx]); }
+
+// ---- Export ----
+const EXPORT_HEADERS = ['Package Code','Order Group','Customer Code','Customer Name','Weight (g)','Karat','Fine Gold (g)','Making Karat','Making Charge (g)','Net Fine Gold (g)','Ledger Status','Credit Fine Gold (g)','Net Balance (g)','Status','Credit Date','Estimated Completion','Delivery Date','Timeliness','HUID','Received By','Late Reason','Remarks'];
+function rowsToExportArray() {
+  return lastLoadedRows.map(p => [
+    p.package_code, p.order_group_code, p.customer.code, p.customer.name, p.weight_grams, p.karat, p.fine_gold_grams,
+    p.making_karat, p.making_charge_fine_gold_grams, p.net_fine_gold_grams, p.ledger_status,
+    p.credit_fine_gold_grams, p.net_balance_fine_gold_grams, (p.package_status||'').replace(/_/g,' '),
+    p.credit_date, p.estimated_completion_date, p.delivery_date, p.timeliness, p.huid_number, p.received_by_name, p.late_reason, p.remarks
+  ]);
+}
+function exportTableExcel() {
+  if (!lastLoadedRows.length) { alert('No rows to export.'); return; }
+  exportRowsToExcel('sk-jewellers-orders.xlsx', 'Orders', EXPORT_HEADERS, rowsToExportArray());
+}
+function exportTablePdf() {
+  if (!lastLoadedRows.length) { alert('No rows to export.'); return; }
+  exportRowsToPdf('sk-jewellers-orders.pdf', 'SK Jewellers — Orders Export', EXPORT_HEADERS, rowsToExportArray());
+}
+
+function openPkgModal(p) {
+  document.getElementById('modalTitle').textContent = p ? 'Edit Package' : 'New Package / Order';
+  document.getElementById('pkgId').value = p ? p.id : '';
+  document.getElementById('customer_id').value = p ? p.customer_id : customers[0]?.id || '';
+  document.getElementById('package_code').value = p ? p.package_code : '';
+  document.getElementById('order_group_code').value = p ? (p.order_group_code || '') : '';
+  loadOrderGroupSuggestions();
+  document.getElementById('customer_id').onchange = loadOrderGroupSuggestions;
+  document.getElementById('weight_grams').value = p ? (p.weight_grams ?? '') : '';
+  document.getElementById('karat').value = p ? (p.karat ?? '') : '';
+  document.getElementById('making_karat').value = p ? (p.making_karat ?? '') : '';
+  document.getElementById('making_charge_fine_gold_grams').value = p ? (p.making_charge_fine_gold_grams ?? '') : '';
+  document.getElementById('credit_date').value = p ? (p.credit_date || '') : '';
+  document.getElementById('estimated_completion_date').value = p ? (p.estimated_completion_date || '') : '';
+  document.getElementById('ledger_status').value = p ? (p.ledger_status || 'LENA') : 'LENA';
+  document.getElementById('credit_weight_grams').value = p ? (p.credit_weight_grams ?? '') : '';
+  document.getElementById('fine_weight_credit_type').value = p ? (p.fine_weight_credit_type || 'FINE') : 'FINE';
+  document.getElementById('credit_fine_gold_grams').value = p ? (p.credit_fine_gold_grams ?? '') : '';
+  document.getElementById('delivery_date').value = p ? (p.delivery_date || '') : '';
+  document.getElementById('package_status').value = p ? p.package_status : 'IN_PROGRESS';
+  document.getElementById('huid_number').value = p ? (p.huid_number || '') : '';
+  document.getElementById('assigned_maker_id').value = p ? (p.assigned_maker_id || '') : '';
+  document.getElementById('received_by_name').value = p ? (p.received_by_name || '') : '';
+  document.getElementById('late_reason').value = p ? (p.late_reason || '') : '';
+  document.getElementById('remarks').value = p ? (p.remarks || '') : '';
+  document.getElementById('formError').innerHTML = '';
+  maybeShowLateReasonField();
+  maybeShowReceivedByField();
+  document.getElementById('modalOverlay').classList.add('open');
+}
+function closeModal() { document.getElementById('modalOverlay').classList.remove('open'); }
+
+// Lets the owner reuse an existing order-group code for the currently-selected
+// customer, instead of retyping it for every ring in the same multi-ring order.
+async function loadOrderGroupSuggestions() {
+  const customerId = document.getElementById('customer_id').value;
+  const sel = document.getElementById('orderGroupSuggestions');
+  if (!customerId) { sel.innerHTML = '<option value="">Reuse existing group…</option>'; return; }
+  const groups = await api(`/api/order-groups?customerId=${customerId}`);
+  sel.innerHTML = '<option value="">Reuse existing group…</option>' +
+    groups.map(g => `<option value="${escapeHtml(g.order_group_code)}">${escapeHtml(g.order_group_code)} (${g.package_count} rings, ${fmtNum(g.total_weight)} g)</option>`).join('');
+}
+function applyOrderGroupSuggestion() {
+  const sel = document.getElementById('orderGroupSuggestions');
+  if (sel.value) document.getElementById('order_group_code').value = sel.value;
+}
+
+document.getElementById('pkgForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('pkgId').value;
+  const lateReasonVisible = document.getElementById('lateReasonField').style.display !== 'none';
+  const lateReasonValue = document.getElementById('late_reason').value.trim();
+  if (lateReasonVisible && !lateReasonValue) {
+    document.getElementById('formError').innerHTML = `<div class="error-msg">Please explain why this order was delivered late before saving.</div>`;
+    return;
+  }
+  const receivedByValue = document.getElementById('received_by_name').value.trim();
+  if (document.getElementById('package_status').value === 'DELIVERED' && !receivedByValue) {
+    document.getElementById('formError').innerHTML = `<div class="error-msg">Please record who received the order before marking it Delivered.</div>`;
+    return;
+  }
+  const body = {
+    customer_id: Number(document.getElementById('customer_id').value),
+    package_code: document.getElementById('package_code').value.trim(),
+    order_group_code: document.getElementById('order_group_code').value.trim() || null,
+    weight_grams: parseFloat(document.getElementById('weight_grams').value) || null,
+    karat: parseFloat(document.getElementById('karat').value) || null,
+    making_karat: parseFloat(document.getElementById('making_karat').value) || null,
+    making_charge_fine_gold_grams: parseFloat(document.getElementById('making_charge_fine_gold_grams').value) || null,
+    credit_date: document.getElementById('credit_date').value || null,
+    estimated_completion_date: document.getElementById('estimated_completion_date').value || null,
+    ledger_status: document.getElementById('ledger_status').value,
+    credit_weight_grams: parseFloat(document.getElementById('credit_weight_grams').value) || null,
+    fine_weight_credit_type: document.getElementById('fine_weight_credit_type').value,
+    credit_fine_gold_grams: parseFloat(document.getElementById('credit_fine_gold_grams').value) || null,
+    delivery_date: document.getElementById('delivery_date').value || null,
+    package_status: document.getElementById('package_status').value,
+    huid_number: document.getElementById('huid_number').value.trim(),
+    assigned_maker_id: document.getElementById('assigned_maker_id').value ? Number(document.getElementById('assigned_maker_id').value) : null,
+    received_by_name: receivedByValue || null,
+    late_reason: lateReasonValue || null,
+    remarks: document.getElementById('remarks').value.trim(),
+  };
+  try {
+    if (id) await api(`/api/packages/${id}`, { method: 'PUT', body });
+    else await api('/api/packages', { method: 'POST', body });
+    closeModal();
+    await loadPackages();
+  } catch (err) {
+    document.getElementById('formError').innerHTML = `<div class="error-msg">${escapeHtml(err.message)}</div>`;
+  }
+});
+
+async function deletePkg(id) {
+  if (!confirm('Delete this package permanently?')) return;
+  try { await api(`/api/packages/${id}`, { method: 'DELETE' }); await loadPackages(); } catch (err) { alert(err.message); }
+}
+
+// ---- Detail modal: production log + attachments ----
+async function openDetail(pkgId, idx) {
+  currentPkgId = pkgId;
+  const code = lastLoadedRows[idx] ? lastLoadedRows[idx].package_code : pkgId;
+  document.getElementById('detailTitle').textContent = `Package ${code} — Detail`;
+  switchDetailTab('log');
+  currentPkgData = await api(`/api/packages/${pkgId}`);
+  await loadUpdates();
+  await loadAttachments();
+  document.getElementById('detailOverlay').classList.add('open');
+}
+function closeDetail() { document.getElementById('detailOverlay').classList.remove('open'); currentPkgId = null; loadPackages(); }
+
+function shareCurrentPkg() {
+  if (!currentPkgData) return;
+  if (!currentPkgData.customer.phone_number) {
+    if (!confirm("This customer doesn't have a saved phone number. Share anyway and pick a contact manually in WhatsApp?")) return;
+  }
+  shareOrderOnWhatsApp(currentPkgData);
+}
+function exportCurrentPkgSlip() {
+  if (!currentPkgData) return;
+  exportOrderSlipPdf(currentPkgData);
+}
+
+function switchDetailTab(tab) {
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.getElementById('detailTabLog').style.display = tab === 'log' ? '' : 'none';
+  document.getElementById('detailTabPhotos').style.display = tab === 'photos' ? '' : 'none';
+}
+
+async function loadUpdates() {
+  const rows = await api(`/api/packages/${currentPkgId}/updates`);
+  document.getElementById('updatesList').innerHTML = rows.map(u => `
+    <div class="card" style="padding:10px 14px;">
+      <div style="font-size:0.85rem;">${escapeHtml(u.note)}</div>
+      <div class="muted" style="font-size:0.74rem; margin-top:4px;">${escapeHtml(u.updated_by_name||'')} · ${escapeHtml(u.created_at)} · ${statusBadge(u.status_at_time)}</div>
+    </div>
+  `).join('') || '<p class="muted">No production updates logged yet.</p>';
+}
+
+document.getElementById('updateForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const note = document.getElementById('updateNote').value.trim();
+  if (!note) return;
+  try {
+    await api(`/api/packages/${currentPkgId}/updates`, { method: 'POST', body: { note } });
+    document.getElementById('updateNote').value = '';
+    await loadUpdates();
+  } catch (err) { alert(err.message); }
+});
+
+async function loadAttachments() {
+  const rows = await api(`/api/attachments?packageId=${currentPkgId}`);
+  document.getElementById('attachmentsList').innerHTML = rows.map(a => `
+    <div style="text-align:center;">
+      ${a.type === 'PHOTO'
+        ? `<img class="photo-thumb" src="/uploads/${a.file_path}" alt="${escapeHtml(a.original_name)}">`
+        : `<a href="/uploads/${a.file_path}" target="_blank" class="photo-thumb" style="display:flex;align-items:center;justify-content:center;background:#f4f0e6;">📄</a>`}
+      <div class="muted" style="font-size:0.7rem; max-width:90px; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(a.original_name)}</div>
+      <button class="btn small danger" style="margin-top:4px;" onclick="deleteAttachment(${a.id})">Remove</button>
+    </div>
+  `).join('') || '<p class="muted">No photos or documents attached yet.</p>';
+}
+
+document.getElementById('attachForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fileInput = document.getElementById('attachFile');
+  if (!fileInput.files[0]) return;
+  const fd = new FormData();
+  fd.append('file', fileInput.files[0]);
+  fd.append('package_id', currentPkgId);
+  fd.append('type', document.getElementById('attachType').value);
+  fd.append('note', document.getElementById('attachNote').value);
+  try {
+    await apiUpload('/api/attachments', fd);
+    fileInput.value = '';
+    document.getElementById('attachNote').value = '';
+    await loadAttachments();
+  } catch (err) { alert(err.message); }
+});
+
+async function deleteAttachment(id) {
+  if (!confirm('Remove this file?')) return;
+  try { await api(`/api/attachments/${id}`, { method: 'DELETE' }); await loadAttachments(); } catch (err) { alert(err.message); }
+}
+</script>
+</body>
+</html>
