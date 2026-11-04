@@ -1,0 +1,6 @@
+data/*.sqlite
+data/backups/*.zip
+uploads/*
+!uploads/.gitkeep
+node_modules/
+.DS_Store
